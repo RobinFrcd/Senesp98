@@ -4,7 +4,7 @@
     "idf.openOcdConfigs": [
         "board/esp32h2-builtin.cfg"
     ],
-    "idf.port": "/dev/ttyUSB0",
+    "idf.port": "/dev/ttyACM0",
     "idf.toolsPath": "/home/robz/.espressif",
     "idf.flashType": "UART",
     "files.associations": {
@@ -13,6 +13,9 @@
         "sensirion_i2c_hal.h": "c",
         "sen66_esp32.h": "c",
         "esp_zb_sen66.h": "c",
-        "i2c_master.h": "c"
+        "i2c_master.h": "c",
+        "compare": "c",
+        "cstdint": "c",
+        "semphr.h": "c"
     }
 }
