@@ -35,12 +35,6 @@
 
 static const char *TAG = "ESP_ZB_SEN66_SENSOR";
 
-#define ESP_ZB_ZCL_CLUSTER_ID_PM10_MEASUREMENT 0x042dU
-#define ESP_ZB_ZCL_ATTR_PM10_MEASUREMENT_MEASURED_VALUE_ID 0x0000
-
-#define ESP_ZB_ZCL_CLUSTER_ID_VOC_MEASUREMENT 0x042EU
-#define ESP_ZB_ZCL_ATTR_VOC_MEASUREMENT_MEASURED_VALUE_ID 0x0000
-
 void reportAttribute(uint16_t clusterID, uint16_t attributeID, void *value, uint8_t value_length)
 {
     esp_zb_zcl_report_attr_cmd_t cmd = {
@@ -61,7 +55,7 @@ void reportAttribute(uint16_t clusterID, uint16_t attributeID, void *value, uint
 
 void reportValue(uint16_t cluserID, uint16_t valueID, void *value)
 {
-    //esp_zb_lock_acquire(portMAX_DELAY);
+    esp_zb_lock_acquire(portMAX_DELAY);
     esp_zb_zcl_set_attribute_val(
         HA_ESP_SENSOR_ENDPOINT, 
         cluserID, 
@@ -70,13 +64,18 @@ void reportValue(uint16_t cluserID, uint16_t valueID, void *value)
         value, 
         false
     );
-    // esp_zb_lock_release();
+    esp_zb_lock_release();
 }
 
 static void bdb_start_top_level_commissioning_cb(uint8_t mode_mask)
 {
-    ESP_RETURN_ON_FALSE(esp_zb_bdb_start_top_level_commissioning(mode_mask) == ESP_OK, ,
-                        TAG, "Failed to start Zigbee bdb commissioning");
+    esp_err_t err = esp_zb_bdb_start_top_level_commissioning(mode_mask);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to start Zigbee bdb commissioning: %s", esp_err_to_name(err));
+        // Retry after a longer delay
+        esp_zb_scheduler_alarm((esp_zb_callback_t)bdb_start_top_level_commissioning_cb,
+                             mode_mask, 5000); 
+    }
 }
 
 void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
@@ -99,12 +98,13 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
                 esp_zb_bdb_start_top_level_commissioning(ESP_ZB_BDB_MODE_NETWORK_STEERING);
             } else {
                 ESP_LOGI(TAG, "Device rebooted");
+                esp_zb_bdb_start_top_level_commissioning(ESP_ZB_BDB_MODE_NETWORK_STEERING);
             }
         } else {
             ESP_LOGW(TAG, "%s failed with status: %s, retrying", esp_zb_zdo_signal_to_string(sig_type),
                      esp_err_to_name(err_status));
             esp_zb_scheduler_alarm((esp_zb_callback_t)bdb_start_top_level_commissioning_cb,
-                                   ESP_ZB_BDB_MODE_INITIALIZATION, 1000);
+                                   ESP_ZB_BDB_MODE_INITIALIZATION, 5000);
         }
         break;
     case ESP_ZB_BDB_SIGNAL_STEERING:
@@ -131,18 +131,21 @@ static esp_zb_cluster_list_t *custom_sensor_clusters_create()
 {
     esp_zb_basic_cluster_cfg_t basic_cfg;
     esp_zb_identify_cluster_cfg_t identify_cfg;
+    basic_cfg.power_source = ZCL_BASIC_POWER_SOURCE;
     
     esp_zb_cluster_list_t *cluster_list = esp_zb_zcl_cluster_list_create();
     esp_zb_attribute_list_t *basic_cluster = esp_zb_basic_cluster_create(&basic_cfg);
     DEFINE_PSTRING(ManufacturerName, "Sensirion");
+    DEFINE_PSTRING(ModelName, "SEN66");
+
     ESP_ERROR_CHECK(esp_zb_basic_cluster_add_attr(basic_cluster, ESP_ZB_ZCL_ATTR_BASIC_MANUFACTURER_NAME_ID, (void *)&ManufacturerName));
-    ESP_ERROR_CHECK(esp_zb_basic_cluster_add_attr(basic_cluster, ESP_ZB_ZCL_ATTR_BASIC_MODEL_IDENTIFIER_ID, MODEL_IDENTIFIER));
+    ESP_ERROR_CHECK(esp_zb_basic_cluster_add_attr(basic_cluster, ESP_ZB_ZCL_ATTR_BASIC_MODEL_IDENTIFIER_ID, (void *)&ModelName));
     ESP_ERROR_CHECK(esp_zb_cluster_list_add_basic_cluster(cluster_list, basic_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE));
     ESP_ERROR_CHECK(esp_zb_cluster_list_add_identify_cluster(cluster_list, esp_zb_identify_cluster_create(&identify_cfg), ESP_ZB_ZCL_CLUSTER_SERVER_ROLE));
     ESP_ERROR_CHECK(esp_zb_cluster_list_add_identify_cluster(cluster_list, esp_zb_zcl_attr_list_create(ESP_ZB_ZCL_CLUSTER_ID_IDENTIFY), ESP_ZB_ZCL_CLUSTER_CLIENT_ROLE));
     
     esp_zb_temperature_meas_cluster_cfg_t temperature_meas_cfg = {
-        .measured_value = 0xFFFF,
+        //.measured_value = 0,
         .min_value = -1000,
         .max_value = 6000,
     };
@@ -154,7 +157,7 @@ static esp_zb_cluster_list_t *custom_sensor_clusters_create()
     ESP_LOGI(TAG, "Temperature measurement cluster added");
 
     esp_zb_humidity_meas_cluster_cfg_t humidity_meas_cfg = {
-        .measured_value = 0xFFFF,
+        //.measured_value = 0,
         .min_value = 0,
         .max_value = 65535,
     };
@@ -166,9 +169,9 @@ static esp_zb_cluster_list_t *custom_sensor_clusters_create()
     ESP_LOGI(TAG, "Humidity measurement cluster added");
 
     esp_zb_pm2_5_measurement_cluster_cfg_t pm2_5_meas_cfg = {
-        .measured_value = 0xFFFF,
+        //.measured_value = 0,
         .min_measured_value = 0,
-        .max_measured_value = 65535,
+        .max_measured_value = SEN66_PM2_5_MAX_VALUE,
     };
     ESP_ERROR_CHECK(esp_zb_cluster_list_add_pm2_5_measurement_cluster(
         cluster_list, 
@@ -176,11 +179,11 @@ static esp_zb_cluster_list_t *custom_sensor_clusters_create()
         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE
     ));
     ESP_LOGI(TAG, "PM2.5 measurement cluster added");
-    
-    esp_zb_carbon_dioxide_measurement_cluster_cfg_t co2_meas_cfg = {
-        .measured_value = 0xFFFF,
+
+   esp_zb_carbon_dioxide_measurement_cluster_cfg_t co2_meas_cfg = {
+        //.measured_value = 0,
         .min_measured_value = 0,
-        .max_measured_value = 10000,
+        .max_measured_value = SEN66_CO2_MAX_VALUE,
     };
     ESP_ERROR_CHECK(esp_zb_cluster_list_add_carbon_dioxide_measurement_cluster(
         cluster_list,
@@ -189,6 +192,64 @@ static esp_zb_cluster_list_t *custom_sensor_clusters_create()
     ));
     ESP_LOGI(TAG, "Carbon dioxide measurement cluster added");
 
+    // Custon Clusters
+    float_t zero_value = 0.0;
+
+    esp_zb_attribute_list_t *pm1_cluster = esp_zb_zcl_attr_list_create(ESP_ZB_ZCL_CLUSTER_ID_PM1_MEASUREMENT);
+    esp_zb_custom_cluster_add_custom_attr(
+        pm1_cluster, 
+        ESP_ZB_ZCL_ATTR_PM1_MEASUREMENT_MEASURED_VALUE_ID, 
+        ESP_ZB_ZCL_ATTR_TYPE_SINGLE, 
+        ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE | ESP_ZB_ZCL_ATTR_ACCESS_REPORTING, 
+        &zero_value
+    );
+    esp_zb_cluster_list_add_custom_cluster(cluster_list, pm1_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
+    ESP_LOGI(TAG, "PM1 measurement cluster added (custom)");
+
+    esp_zb_attribute_list_t *pm4_cluster = esp_zb_zcl_attr_list_create(ESP_ZB_ZCL_CLUSTER_ID_PM4_MEASUREMENT);
+    esp_zb_custom_cluster_add_custom_attr(
+        pm4_cluster, 
+        ESP_ZB_ZCL_ATTR_PM4_MEASUREMENT_MEASURED_VALUE_ID, 
+        ESP_ZB_ZCL_ATTR_TYPE_SINGLE, 
+        ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE | ESP_ZB_ZCL_ATTR_ACCESS_REPORTING, 
+        &zero_value
+    );
+    esp_zb_cluster_list_add_custom_cluster(cluster_list, pm4_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
+    ESP_LOGI(TAG, "PM4 measurement cluster added (custom)");
+
+    esp_zb_attribute_list_t *pm10_cluster = esp_zb_zcl_attr_list_create(ESP_ZB_ZCL_CLUSTER_ID_PM10_MEASUREMENT);
+    esp_zb_custom_cluster_add_custom_attr(
+        pm10_cluster, 
+        ESP_ZB_ZCL_ATTR_PM10_MEASUREMENT_MEASURED_VALUE_ID, 
+        ESP_ZB_ZCL_ATTR_TYPE_SINGLE, 
+        ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE | ESP_ZB_ZCL_ATTR_ACCESS_REPORTING, 
+        &zero_value
+    );
+    esp_zb_cluster_list_add_custom_cluster(cluster_list, pm10_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
+    ESP_LOGI(TAG, "PM10 measurement cluster added (custom)");
+
+    esp_zb_attribute_list_t *voc_cluster = esp_zb_zcl_attr_list_create(ESP_ZB_ZCL_CLUSTER_ID_VOC_MEASUREMENT);
+    esp_zb_custom_cluster_add_custom_attr(
+        voc_cluster, 
+        ESP_ZB_ZCL_ATTR_VOC_MEASUREMENT_MEASURED_VALUE_ID, 
+        ESP_ZB_ZCL_ATTR_TYPE_SINGLE, 
+        ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE | ESP_ZB_ZCL_ATTR_ACCESS_REPORTING, 
+        &zero_value
+    );
+    esp_zb_cluster_list_add_custom_cluster(cluster_list, voc_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
+    ESP_LOGI(TAG, "VOC measurement cluster added (custom)");
+
+    esp_zb_attribute_list_t *nox_cluster = esp_zb_zcl_attr_list_create(ESP_ZB_ZCL_CLUSTER_ID_NOX_MEASUREMENT);
+    esp_zb_custom_cluster_add_custom_attr(
+        nox_cluster, 
+        ESP_ZB_ZCL_ATTR_NOX_MEASUREMENT_MEASURED_VALUE_ID, 
+        ESP_ZB_ZCL_ATTR_TYPE_SINGLE, 
+        ESP_ZB_ZCL_ATTR_ACCESS_READ_WRITE | ESP_ZB_ZCL_ATTR_ACCESS_REPORTING, 
+        &zero_value
+    );
+    esp_zb_cluster_list_add_custom_cluster(cluster_list, nox_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
+    ESP_LOGI(TAG, "NOx measurement cluster added (custom)");
+    
     return cluster_list;
 }
 
@@ -260,6 +321,37 @@ static void init_zigbee(void)
         ESP_ZB_ZCL_ATTR_CARBON_DIOXIDE_MEASUREMENT_MEASURED_VALUE_ID
     );
 
+    configure_cluster_reporting(
+        HA_ESP_SENSOR_ENDPOINT,
+        ESP_ZB_ZCL_CLUSTER_ID_PM1_MEASUREMENT,
+        ESP_ZB_ZCL_ATTR_PM1_MEASUREMENT_MEASURED_VALUE_ID
+    );
+
+    configure_cluster_reporting(
+        HA_ESP_SENSOR_ENDPOINT,
+        ESP_ZB_ZCL_CLUSTER_ID_PM4_MEASUREMENT,
+        ESP_ZB_ZCL_ATTR_PM4_MEASUREMENT_MEASURED_VALUE_ID
+    );    
+    
+    configure_cluster_reporting(
+        HA_ESP_SENSOR_ENDPOINT,
+        ESP_ZB_ZCL_CLUSTER_ID_PM10_MEASUREMENT,
+        ESP_ZB_ZCL_ATTR_PM10_MEASUREMENT_MEASURED_VALUE_ID
+    );
+
+    configure_cluster_reporting(
+        HA_ESP_SENSOR_ENDPOINT,
+        ESP_ZB_ZCL_CLUSTER_ID_VOC_MEASUREMENT,
+        ESP_ZB_ZCL_ATTR_VOC_MEASUREMENT_MEASURED_VALUE_ID
+    );
+    
+    configure_cluster_reporting(
+        HA_ESP_SENSOR_ENDPOINT,
+        ESP_ZB_ZCL_CLUSTER_ID_NOX_MEASUREMENT,
+        ESP_ZB_ZCL_ATTR_NOX_MEASUREMENT_MEASURED_VALUE_ID
+    );
+
+
     esp_zb_set_primary_network_channel_set(ESP_ZB_PRIMARY_CHANNEL_MASK);
     ESP_ERROR_CHECK(esp_zb_start(false));
 }
@@ -304,9 +396,10 @@ static void read_temperature_task(void *pvParameters)
             &mass_concentration_pm1p0, &mass_concentration_pm2p5,
             &mass_concentration_pm4p0, &mass_concentration_pm10p0,
             &ambient_humidity, &ambient_temperature, &voc_index,
-            &nox_index, &co2);
+            &nox_index, &co2
+        );
 
-        esp_zb_lock_acquire(portMAX_DELAY);
+        //esp_zb_lock_acquire(portMAX_DELAY);
         // Update Zigbee attribute with new temperature
         int16_t temp_value = ambient_temperature / 2;
         ESP_LOGI(TAG, "Temperature: %.1f °C | Z2M Value: %d", ambient_temperature / 200.0f, temp_value);
@@ -316,26 +409,55 @@ static void read_temperature_task(void *pvParameters)
         ESP_LOGI(TAG, "Humidity: %.2f %%", ambient_humidity / 100.0f);
         reportValue(ESP_ZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT, ESP_ZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_VALUE_ID, &ambient_humidity);
         
-        float_t pm25_value = mass_concentration_pm2p5 / 10.0f;
-        ESP_LOGI(TAG, "PM2.5: %.1f µg/m³", pm25_value);
-        reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM2_5_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM2_5_MEASUREMENT_MEASURED_VALUE_ID, &pm25_value);
-                          
-        float_t co2_value = ((co2 > 10000) ? 10000.0f : (float_t) co2) / 1000000.0f;
-        ESP_LOGI(TAG, "CO2: %.1f ppm", co2_value * 1000000.0f);
-        reportValue(ESP_ZB_ZCL_CLUSTER_ID_CARBON_DIOXIDE_MEASUREMENT, ESP_ZB_ZCL_ATTR_CARBON_DIOXIDE_MEASUREMENT_MEASURED_VALUE_ID, &co2_value);
+        if (mass_concentration_pm2p5 == SEN66_PM2_5_MAX_VALUE) { 
+            ESP_LOGI(TAG, "PM2.5: null (value too high)");
+        } else {
+            float_t pm25_value = (float_t)mass_concentration_pm2p5 / 10.0f;
+            ESP_LOGI(TAG, "PM2.5: %.1f µg/m³", pm25_value);
+            reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM2_5_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM2_5_MEASUREMENT_MEASURED_VALUE_ID, &pm25_value);
+        }
+                 
+        if (co2 == SEN66_CO2_MAX_VALUE) {
+            ESP_LOGI(TAG, "CO2: null (value too high)");
+        } else {
+            float_t co2_value = (float_t)co2 / 1000000.0f;
+            ESP_LOGI(TAG, "CO2: %.1f ppm", co2_value * 1000000.0f);
+            reportValue(ESP_ZB_ZCL_CLUSTER_ID_CARBON_DIOXIDE_MEASUREMENT, ESP_ZB_ZCL_ATTR_CARBON_DIOXIDE_MEASUREMENT_MEASURED_VALUE_ID, &co2_value);
+        }
 
-        esp_zb_lock_release();
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        float_t pm1_value = mass_concentration_pm1p0 / 10.0f;
+        ESP_LOGI(TAG, "PM1: %.1f µg/m³", pm1_value);
+        reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM1_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM1_MEASUREMENT_MEASURED_VALUE_ID, &pm1_value);
+
+        float_t pm4_value = mass_concentration_pm4p0 / 10.0f;
+        ESP_LOGI(TAG, "PM4: %.1f µg/m³", pm4_value);
+        reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM4_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM4_MEASUREMENT_MEASURED_VALUE_ID, &pm4_value);
+
+        float_t pm10_value = mass_concentration_pm10p0 / 10.0f;
+        ESP_LOGI(TAG, "PM10: %.1f µg/m³", pm10_value);
+        reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM10_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM10_MEASUREMENT_MEASURED_VALUE_ID, &pm10_value);        
+
+        float_t voc_value = voc_index / 10;
+        ESP_LOGI(TAG, "VOC index: %.1f", voc_value);
+        reportValue(ESP_ZB_ZCL_CLUSTER_ID_VOC_MEASUREMENT, ESP_ZB_ZCL_ATTR_VOC_MEASUREMENT_MEASURED_VALUE_ID, &voc_value);
+        
+        float_t nox_value = nox_index / 10;
+        ESP_LOGI(TAG, "NOx index: %.1f", nox_value);
+        reportValue(ESP_ZB_ZCL_CLUSTER_ID_NOX_MEASUREMENT, ESP_ZB_ZCL_ATTR_NOX_MEASUREMENT_MEASURED_VALUE_ID, &nox_value);
+
+        vTaskDelay(pdMS_TO_TICKS(10000));
     }
 }
 
 void app_main(void)
 {
+    ESP_ERROR_CHECK(nvs_flash_erase());
+    ESP_ERROR_CHECK(nvs_flash_init());
+    
     esp_zb_platform_config_t config = {
         .radio_config = ESP_ZB_DEFAULT_RADIO_CONFIG(),
         .host_config = ESP_ZB_DEFAULT_HOST_CONFIG(),
     };
-    ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_zb_platform_config(&config));
 
     init_zigbee();

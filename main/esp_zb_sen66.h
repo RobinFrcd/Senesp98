@@ -25,11 +25,30 @@
 #define ESP_TEMP_SENSOR_MIN_VALUE       (-10)   /* Local sensor min measured value (degree Celsius) */
 #define ESP_TEMP_SENSOR_MAX_VALUE       (80)    /* Local sensor max measured value (degree Celsius) */
 
-/* Attribute values in ZCL string format
- * The string should be started with the length of its own.
- */
-#define MANUFACTURER_NAME               "\x09""ESPRESSIF"
-#define MODEL_IDENTIFIER                "\x07"CONFIG_IDF_TARGET
+#define ZCL_BASIC_POWER_SOURCE 1
+
+#define ESP_ZB_ZCL_CLUSTER_ID_VOC_MEASUREMENT 0x8001U //0x042EU
+#define ESP_ZB_ZCL_ATTR_VOC_MEASUREMENT_MEASURED_VALUE_ID 0x0000
+
+#define ESP_ZB_ZCL_CLUSTER_ID_PM1_MEASUREMENT 0x8002 
+#define ESP_ZB_ZCL_ATTR_PM1_MEASUREMENT_MEASURED_VALUE_ID 0x0000
+
+#define ESP_ZB_ZCL_CLUSTER_ID_PM4_MEASUREMENT 0x8003
+#define ESP_ZB_ZCL_ATTR_PM4_MEASUREMENT_MEASURED_VALUE_ID 0x0000
+
+#define ESP_ZB_ZCL_CLUSTER_ID_PM10_MEASUREMENT 0x8004 // 0x042dU
+#define ESP_ZB_ZCL_ATTR_PM10_MEASUREMENT_MEASURED_VALUE_ID 0x0000
+
+#define ESP_ZB_ZCL_CLUSTER_ID_NOX_MEASUREMENT 0x8005 // 0x042dU
+#define ESP_ZB_ZCL_ATTR_NOX_MEASUREMENT_MEASURED_VALUE_ID 0x0000
+
+
+#define SEN66_PM2_5_MAX_VALUE 0xFFFF
+#define SEN66_CO2_MAX_VALUE 0xFFFF
+
+#define ESP_ZB_ZCL_MANUFACTURER_CODE_SENSIRION 0x1234
+
+
 
 #define ESP_ZB_ZED_CONFIG()                                         \
     {                                                               \
