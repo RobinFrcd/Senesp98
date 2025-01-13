@@ -1,0 +1,36 @@
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+    -   id: trailing-whitespace
+        exclude: ^main/sen66/
+    -   id: end-of-file-fixer
+        exclude: ^main/sen66/
+    -   id: check-yaml
+        exclude: ^main/sen66/
+    -   id: check-added-large-files
+        exclude: ^main/sen66/
+
+-   repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v19.1.6
+    hooks:
+      - id: clang-format
+        args: ["--style=file"]
+        files: \.(cpp|hpp|c|h)$
+        exclude: ^main/sen66/
+
+
+-   repo: https://github.com/pocc/pre-commit-hooks
+    rev: v1.3.5
+    hooks:
+    -   id: cpplint
+        args: ["--filter=-legal/copyright,-build/include_subdir", "--linelength=120"]
+        exclude: ^main/sen66/
+
+-   repo: https://github.com/cheshirekow/cmake-format-precommit
+    rev: v0.6.13
+    hooks:
+    -   id: cmake-format
+        exclude: ^main/sen66/
+    -   id: cmake-lint
+        exclude: ^main/sen66/ 
