@@ -1,17 +1,3 @@
-/*
- * SPDX-FileCopyrightText: 2024 Espressif Systems (Shanghai) CO LTD
- *
- * SPDX-License-Identifier: CC0-1.0
- *
- * Zigbee HA_temperature_sensor Example
- *
- * This example code is in the Public Domain (or CC0 licensed, at your option.)
- *
- * Unless required by applicable law or agreed to in writing, this
- * software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
- * CONDITIONS OF ANY KIND, either express or implied.
- */
-
 #include "esp_check.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -21,6 +7,7 @@
 #include "sen66_esp32.h"
 #include "esp_zb_sen66.h"
 #include "string.h"
+#include <math.h>
 
 #if !defined ZB_ED_ROLE
 #error Define ZB_ED_ROLE in idf.py menuconfig to compile sensor (End Device) source code.
@@ -53,15 +40,22 @@ void reportAttribute(uint16_t clusterID, uint16_t attributeID, void *value, uint
     esp_zb_zcl_report_attr_cmd_req(&cmd);
 }
 
-void reportValue(uint16_t cluserID, uint16_t valueID, void *value)
+void reportValue(uint16_t clusterID, uint16_t valueID, void *value, bool round)
 {
+    float_t rounded_value;
+    
+    if (round) {
+        rounded_value = *(float_t *)value;
+        rounded_value = roundf(rounded_value * 100) / 100;  // Round to 2 decimal places
+    }
+
     esp_zb_lock_acquire(portMAX_DELAY);
     esp_zb_zcl_set_attribute_val(
         HA_ESP_SENSOR_ENDPOINT, 
-        cluserID, 
+        clusterID, 
         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE, 
         valueID, 
-        value, 
+        round ? &rounded_value : value,
         false
     );
     esp_zb_lock_release();
@@ -293,7 +287,6 @@ static void init_zigbee(void)
 
     esp_zb_ep_list_t *esp_zb_sensor_ep = custom_sensor_ep_create(HA_ESP_SENSOR_ENDPOINT);
 
-    /* Register the device */
     esp_zb_device_register(esp_zb_sensor_ep);
 
     /* Configure reporting for all clusters */
@@ -378,7 +371,7 @@ static void read_temperature_task(void *pvParameters)
         bool data_ready = false;
         uint8_t padding;
 
-        // Vérifier si les données sont prêtes
+        // Check if data is ready
         error = sen66_get_data_ready(&padding, &data_ready);
         if (error) {
             ESP_LOGE(TAG, "Error checking data ready: %d", error);
@@ -399,22 +392,19 @@ static void read_temperature_task(void *pvParameters)
             &nox_index, &co2
         );
 
-        //esp_zb_lock_acquire(portMAX_DELAY);
-        // Update Zigbee attribute with new temperature
         int16_t temp_value = ambient_temperature / 2;
         ESP_LOGI(TAG, "Temperature: %.1f °C | Z2M Value: %d", ambient_temperature / 200.0f, temp_value);
-        reportValue(ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT, ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID, &temp_value);
+        reportValue(ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT, ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID, &temp_value, false);
         
-        // Update Zigbee attribute with new temperature
         ESP_LOGI(TAG, "Humidity: %.2f %%", ambient_humidity / 100.0f);
-        reportValue(ESP_ZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT, ESP_ZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_VALUE_ID, &ambient_humidity);
+        reportValue(ESP_ZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT, ESP_ZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_VALUE_ID, &ambient_humidity, false);
         
         if (mass_concentration_pm2p5 == SEN66_PM2_5_MAX_VALUE) { 
             ESP_LOGI(TAG, "PM2.5: null (value too high)");
         } else {
             float_t pm25_value = (float_t)mass_concentration_pm2p5 / 10.0f;
             ESP_LOGI(TAG, "PM2.5: %.1f µg/m³", pm25_value);
-            reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM2_5_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM2_5_MEASUREMENT_MEASURED_VALUE_ID, &pm25_value);
+            reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM2_5_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM2_5_MEASUREMENT_MEASURED_VALUE_ID, &pm25_value, false);
         }
                  
         if (co2 == SEN66_CO2_MAX_VALUE) {
@@ -422,28 +412,28 @@ static void read_temperature_task(void *pvParameters)
         } else {
             float_t co2_value = (float_t)co2 / 1000000.0f;
             ESP_LOGI(TAG, "CO2: %.1f ppm", co2_value * 1000000.0f);
-            reportValue(ESP_ZB_ZCL_CLUSTER_ID_CARBON_DIOXIDE_MEASUREMENT, ESP_ZB_ZCL_ATTR_CARBON_DIOXIDE_MEASUREMENT_MEASURED_VALUE_ID, &co2_value);
+            reportValue(ESP_ZB_ZCL_CLUSTER_ID_CARBON_DIOXIDE_MEASUREMENT, ESP_ZB_ZCL_ATTR_CARBON_DIOXIDE_MEASUREMENT_MEASURED_VALUE_ID, &co2_value, false);
         }
 
         float_t pm1_value = mass_concentration_pm1p0 / 10.0f;
         ESP_LOGI(TAG, "PM1: %.1f µg/m³", pm1_value);
-        reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM1_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM1_MEASUREMENT_MEASURED_VALUE_ID, &pm1_value);
+        reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM1_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM1_MEASUREMENT_MEASURED_VALUE_ID, &pm1_value, true);
 
         float_t pm4_value = mass_concentration_pm4p0 / 10.0f;
         ESP_LOGI(TAG, "PM4: %.1f µg/m³", pm4_value);
-        reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM4_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM4_MEASUREMENT_MEASURED_VALUE_ID, &pm4_value);
+        reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM4_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM4_MEASUREMENT_MEASURED_VALUE_ID, &pm4_value, true);
 
         float_t pm10_value = mass_concentration_pm10p0 / 10.0f;
         ESP_LOGI(TAG, "PM10: %.1f µg/m³", pm10_value);
-        reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM10_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM10_MEASUREMENT_MEASURED_VALUE_ID, &pm10_value);        
+        reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM10_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM10_MEASUREMENT_MEASURED_VALUE_ID, &pm10_value, true);        
 
         float_t voc_value = voc_index / 10;
         ESP_LOGI(TAG, "VOC index: %.1f", voc_value);
-        reportValue(ESP_ZB_ZCL_CLUSTER_ID_VOC_MEASUREMENT, ESP_ZB_ZCL_ATTR_VOC_MEASUREMENT_MEASURED_VALUE_ID, &voc_value);
+        reportValue(ESP_ZB_ZCL_CLUSTER_ID_VOC_MEASUREMENT, ESP_ZB_ZCL_ATTR_VOC_MEASUREMENT_MEASURED_VALUE_ID, &voc_value, true);
         
         float_t nox_value = nox_index / 10;
         ESP_LOGI(TAG, "NOx index: %.1f", nox_value);
-        reportValue(ESP_ZB_ZCL_CLUSTER_ID_NOX_MEASUREMENT, ESP_ZB_ZCL_ATTR_NOX_MEASUREMENT_MEASURED_VALUE_ID, &nox_value);
+        reportValue(ESP_ZB_ZCL_CLUSTER_ID_NOX_MEASUREMENT, ESP_ZB_ZCL_ATTR_NOX_MEASUREMENT_MEASURED_VALUE_ID, &nox_value, true);
 
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
@@ -451,6 +441,7 @@ static void read_temperature_task(void *pvParameters)
 
 void app_main(void)
 {
+    // Completely erase NVS memory and reinitialize it
     ESP_ERROR_CHECK(nvs_flash_erase());
     ESP_ERROR_CHECK(nvs_flash_init());
     
@@ -460,7 +451,15 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(esp_zb_platform_config(&config));
 
+    // Wait for configuration to be applied
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // Initialize Zigbee with delay
     init_zigbee();
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    // Create tasks with different priorities
     xTaskCreate(esp_zb_task, "Zigbee_main", 16384, NULL, 5, NULL);
+    vTaskDelay(pdMS_TO_TICKS(1000));  // Wait for Zigbee task to start
     xTaskCreate(read_temperature_task, "temp_reader", 16384, NULL, 4, NULL);
 }
