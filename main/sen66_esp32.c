@@ -7,18 +7,18 @@
 #include "sen66/sensirion_common.h"
 #include "sen66/sensirion_i2c_hal.h"
 
-#define I2C_MASTER_SCL_IO 22       // GPIO pour SCL
-#define I2C_MASTER_SDA_IO 10       // GPIO pour SDA
+#define I2C_MASTER_SCL_IO 22       // SCL
+#define I2C_MASTER_SDA_IO 10       // SDA
 #define I2C_MASTER_NUM 0           // I2C port number
-#define I2C_MASTER_FREQ_HZ 100000  // Fréquence I2C
-#define SEN66_I2C_ADDRESS 0x6b     // Adresse I2C du SEN66
+#define I2C_MASTER_FREQ_HZ 100000  // Frequency I2C
+#define SEN66_I2C_ADDRESS 0x6b     // I2C address of SEN66
 
 static const char* TAG = "SEN66";
 
 // Add global semaphore
 static SemaphoreHandle_t i2c_mutex = NULL;
 
-// Implémentation des fonctions HAL requises
+// Implementation of HAL functions required
 int8_t sensirion_i2c_hal_write(uint8_t address, const uint8_t* data, uint8_t count) {
     if (xSemaphoreTake(i2c_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
         ESP_LOGE(TAG, "Failed to acquire I2C mutex for write");
