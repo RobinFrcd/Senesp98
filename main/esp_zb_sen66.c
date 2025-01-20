@@ -69,46 +69,46 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct) {
     uint32_t *p_sg_p = signal_struct->p_app_signal;
     esp_err_t err_status = signal_struct->esp_err_status;
     esp_zb_app_signal_type_t sig_type = *p_sg_p;
+
+    static bool commissioning_in_progress = false;
+
     switch (sig_type) {
         case ESP_ZB_ZDO_SIGNAL_SKIP_STARTUP:
             ESP_LOGI(TAG, "Initialize Zigbee stack");
             esp_zb_bdb_start_top_level_commissioning(ESP_ZB_BDB_MODE_INITIALIZATION);
             break;
+
         case ESP_ZB_BDB_SIGNAL_DEVICE_FIRST_START:
         case ESP_ZB_BDB_SIGNAL_DEVICE_REBOOT:
             if (err_status == ESP_OK) {
-                ESP_LOGI(TAG, "Deferred driver initialization %s", sen66_sensor_init() ? "failed" : "successful");
                 ESP_LOGI(TAG, "Device started up in%s factory-reset mode", esp_zb_bdb_is_factory_new() ? "" : " non");
-                if (esp_zb_bdb_is_factory_new()) {
+                if (!commissioning_in_progress) {
+                    commissioning_in_progress = true;
                     ESP_LOGI(TAG, "Start network steering");
-                    esp_zb_bdb_start_top_level_commissioning(ESP_ZB_BDB_MODE_NETWORK_STEERING);
-                } else {
-                    ESP_LOGI(TAG, "Device rebooted");
                     esp_zb_bdb_start_top_level_commissioning(ESP_ZB_BDB_MODE_NETWORK_STEERING);
                 }
             } else {
-                ESP_LOGW(TAG, "%s failed with status: %s, retrying", esp_zb_zdo_signal_to_string(sig_type),
-                         esp_err_to_name(err_status));
-                esp_zb_scheduler_alarm((esp_zb_callback_t)bdb_start_top_level_commissioning_cb,
-                                       ESP_ZB_BDB_MODE_INITIALIZATION, 5000);
+                ESP_LOGW(TAG, "Failed to initialize Zigbee stack, rebooting");
+                esp_restart();
             }
             break;
+
         case ESP_ZB_BDB_SIGNAL_STEERING:
             if (err_status == ESP_OK) {
+                commissioning_in_progress = false;
                 esp_zb_ieee_addr_t extended_pan_id;
                 esp_zb_get_extended_pan_id(extended_pan_id);
-                ESP_LOGI(TAG,
-                         "Joined network successfully (Extended PAN ID: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x, PAN "
-                         "ID: 0x%04hx, Channel:%d, Short Address: 0x%04hx)",
-                         extended_pan_id[7], extended_pan_id[6], extended_pan_id[5], extended_pan_id[4],
-                         extended_pan_id[3], extended_pan_id[2], extended_pan_id[1], extended_pan_id[0],
-                         esp_zb_get_pan_id(), esp_zb_get_current_channel(), esp_zb_get_short_address());
+                ESP_LOGI(TAG, "Network steering successful");
             } else {
-                ESP_LOGI(TAG, "Network steering was not successful (status: %s)", esp_err_to_name(err_status));
-                esp_zb_scheduler_alarm((esp_zb_callback_t)bdb_start_top_level_commissioning_cb,
-                                       ESP_ZB_BDB_MODE_NETWORK_STEERING, 1000);
+                if (!commissioning_in_progress) {
+                    commissioning_in_progress = true;
+                    ESP_LOGI(TAG, "Network steering failed, retrying in 1 second");
+                    esp_zb_scheduler_alarm((esp_zb_callback_t)bdb_start_top_level_commissioning_cb,
+                                           ESP_ZB_BDB_MODE_NETWORK_STEERING, 1000);
+                }
             }
             break;
+
         default:
             ESP_LOGI(TAG, "ZDO signal: %s (0x%x), status: %s", esp_zb_zdo_signal_to_string(sig_type), sig_type,
                      esp_err_to_name(err_status));
@@ -137,7 +137,7 @@ static esp_zb_cluster_list_t *custom_sensor_clusters_create() {
         cluster_list, esp_zb_zcl_attr_list_create(ESP_ZB_ZCL_CLUSTER_ID_IDENTIFY), ESP_ZB_ZCL_CLUSTER_CLIENT_ROLE));
 
     esp_zb_temperature_meas_cluster_cfg_t temperature_meas_cfg = {
-        //.measured_value = 0,
+        // .measured_value = 0,
         .min_value = -1000,
         .max_value = 6000,
     };
@@ -146,7 +146,7 @@ static esp_zb_cluster_list_t *custom_sensor_clusters_create() {
     ESP_LOGI(TAG, "Temperature measurement cluster added");
 
     esp_zb_humidity_meas_cluster_cfg_t humidity_meas_cfg = {
-        //.measured_value = 0,
+        // .measured_value = 0,
         .min_value = 0,
         .max_value = 65535,
     };
@@ -155,7 +155,7 @@ static esp_zb_cluster_list_t *custom_sensor_clusters_create() {
     ESP_LOGI(TAG, "Humidity measurement cluster added");
 
     esp_zb_pm2_5_measurement_cluster_cfg_t pm2_5_meas_cfg = {
-        //.measured_value = 0,
+        // .measured_value = 0,
         .min_measured_value = 0,
         .max_measured_value = SEN66_PM2_5_MAX_VALUE,
     };
@@ -164,7 +164,7 @@ static esp_zb_cluster_list_t *custom_sensor_clusters_create() {
     ESP_LOGI(TAG, "PM2.5 measurement cluster added");
 
     esp_zb_carbon_dioxide_measurement_cluster_cfg_t co2_meas_cfg = {
-        //.measured_value = 0,
+        // .measured_value = 0,
         .min_measured_value = 0,
         .max_measured_value = SEN66_CO2_MAX_VALUE,
     };
@@ -290,7 +290,7 @@ static void read_temperature_task(void *pvParameters) {
     uint16_t mass_concentration_pm4p0, mass_concentration_pm10p0;
     int16_t ambient_humidity, ambient_temperature, voc_index;
     int16_t nox_index;
-    uint16_t co2;
+    uint16_t co2_ppm;
     int16_t error;
 
     if (sen66_sensor_init() != ESP_OK) {
@@ -317,59 +317,98 @@ static void read_temperature_task(void *pvParameters) {
 
         error = sen66_read_measured_values_as_integers(
             &mass_concentration_pm1p0, &mass_concentration_pm2p5, &mass_concentration_pm4p0, &mass_concentration_pm10p0,
-            &ambient_humidity, &ambient_temperature, &voc_index, &nox_index, &co2);
+            &ambient_humidity, &ambient_temperature, &voc_index, &nox_index, &co2_ppm);
 
-        int16_t temp_value = ambient_temperature / 2;
-        ESP_LOGI(TAG, "Temperature: %.1f °C | Z2M Value: %d", ambient_temperature / 200.0f, temp_value);
-        reportValue(ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT, ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID, &temp_value,
-                    false);
+        // Temperature check
+        float_t ambient_temperature_celsius = (float_t)ambient_temperature / 200.0f;
+        if (ambient_temperature_celsius > SEN66_TEMP_MAX_VALUE) {
+            ESP_LOGI(TAG, "Temperature: null (value too high)");
+        } else {
+            ESP_LOGI(TAG, "Temperature: %.1f °C", ambient_temperature_celsius);
+            int16_t temp_zigbee = ambient_temperature_celsius * 100;
+            reportValue(ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT, ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID, &temp_zigbee,
+                        false);
+        }
 
-        ESP_LOGI(TAG, "Humidity: %.2f %%", ambient_humidity / 100.0f);
-        reportValue(ESP_ZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT, ESP_ZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_VALUE_ID,
-                    &ambient_humidity, false);
+        // Humidity check
+        float_t ambient_humidity_percentage = (float_t)ambient_humidity / 100.0f;
+        if (ambient_humidity_percentage > SEN66_HUMIDITY_MAX_VALUE) {
+            ESP_LOGI(TAG, "Humidity: null (value too high)");
+        } else {
+            ESP_LOGI(TAG, "Humidity: %.2f %%", ambient_humidity_percentage);
+            reportValue(ESP_ZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT,
+                        ESP_ZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_VALUE_ID, &ambient_humidity, false);
+        }
 
-        if (mass_concentration_pm2p5 == SEN66_PM2_5_MAX_VALUE) {
+        // PM2.5 check
+        float_t pm2_5_ug_m3 = (float_t)mass_concentration_pm2p5 / 10.0f;
+        if (pm2_5_ug_m3 > SEN66_PM2_5_MAX_VALUE) {
             ESP_LOGI(TAG, "PM2.5: null (value too high)");
         } else {
-            float_t pm25_value = (float_t)mass_concentration_pm2p5 / 10.0f;
-            ESP_LOGI(TAG, "PM2.5: %.1f µg/m³", pm25_value);
+            ESP_LOGI(TAG, "PM2.5: %.1f µg/m³", pm2_5_ug_m3);
             reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM2_5_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM2_5_MEASUREMENT_MEASURED_VALUE_ID,
-                        &pm25_value, false);
+                        &pm2_5_ug_m3, false);
         }
 
-        if (co2 == SEN66_CO2_MAX_VALUE) {
+        // CO2 check
+        if (co2_ppm > SEN66_CO2_MAX_VALUE) {
             ESP_LOGI(TAG, "CO2: null (value too high)");
         } else {
-            float_t co2_value = (float_t)co2 / 1000000.0f;
-            ESP_LOGI(TAG, "CO2: %.1f ppm", co2_value * 1000000.0f);
+            float_t co2_zigbee = (float_t)co2_ppm / 1000000.0f;
+            ESP_LOGI(TAG, "CO2: %d ppm", co2_ppm);
             reportValue(ESP_ZB_ZCL_CLUSTER_ID_CARBON_DIOXIDE_MEASUREMENT,
-                        ESP_ZB_ZCL_ATTR_CARBON_DIOXIDE_MEASUREMENT_MEASURED_VALUE_ID, &co2_value, false);
+                        ESP_ZB_ZCL_ATTR_CARBON_DIOXIDE_MEASUREMENT_MEASURED_VALUE_ID, &co2_zigbee, false);
         }
 
-        float_t pm1_value = mass_concentration_pm1p0 / 10.0f;
-        ESP_LOGI(TAG, "PM1: %.1f µg/m³", pm1_value);
-        reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM1_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM1_MEASUREMENT_MEASURED_VALUE_ID,
-                    &pm1_value, true);
+        // PM1 check
+        float_t pm1_ug_m3 = (float_t)mass_concentration_pm1p0 / 10.0f;
+        if (pm1_ug_m3 > SEN66_PM1_MAX_VALUE) {
+            ESP_LOGI(TAG, "PM1: null (value too high)");
+        } else {
+            ESP_LOGI(TAG, "PM1: %.1f µg/m³", pm1_ug_m3);
+            reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM1_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM1_MEASUREMENT_MEASURED_VALUE_ID,
+                        &pm1_ug_m3, true);
+        }
 
-        float_t pm4_value = mass_concentration_pm4p0 / 10.0f;
-        ESP_LOGI(TAG, "PM4: %.1f µg/m³", pm4_value);
-        reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM4_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM4_MEASUREMENT_MEASURED_VALUE_ID,
-                    &pm4_value, true);
+        // PM4 check
+        float_t pm4_ug_m3 = (float_t)mass_concentration_pm4p0 / 10.0f;
+        if (pm4_ug_m3 > SEN66_PM4_MAX_VALUE) {
+            ESP_LOGI(TAG, "PM4: null (value too high)");
+        } else {
+            ESP_LOGI(TAG, "PM4: %.1f µg/m³", pm4_ug_m3);
+            reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM4_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM4_MEASUREMENT_MEASURED_VALUE_ID,
+                        &pm4_ug_m3, true);
+        }
 
-        float_t pm10_value = mass_concentration_pm10p0 / 10.0f;
-        ESP_LOGI(TAG, "PM10: %.1f µg/m³", pm10_value);
-        reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM10_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM10_MEASUREMENT_MEASURED_VALUE_ID,
-                    &pm10_value, true);
+        // PM10 check
+        float_t pm10_ug_m3 = (float_t)mass_concentration_pm10p0 / 10.0f;
+        if (pm10_ug_m3 > SEN66_PM10_MAX_VALUE) {
+            ESP_LOGI(TAG, "PM10: null (value too high)");
+        } else {
+            ESP_LOGI(TAG, "PM10: %.1f µg/m³", pm10_ug_m3);
+            reportValue(ESP_ZB_ZCL_CLUSTER_ID_PM10_MEASUREMENT, ESP_ZB_ZCL_ATTR_PM10_MEASUREMENT_MEASURED_VALUE_ID,
+                        &pm10_ug_m3, true);
+        }
 
-        float_t voc_value = voc_index / 10;
-        ESP_LOGI(TAG, "VOC index: %.1f", voc_value);
-        reportValue(ESP_ZB_ZCL_CLUSTER_ID_VOC_MEASUREMENT, ESP_ZB_ZCL_ATTR_VOC_MEASUREMENT_MEASURED_VALUE_ID,
-                    &voc_value, true);
+        // VOC check
+        float_t voc_index_value = (float_t)voc_index / 10.0f;
+        if (voc_index_value > SEN66_VOC_MAX_VALUE) {
+            ESP_LOGI(TAG, "VOC: null (value too high)");
+        } else {
+            ESP_LOGI(TAG, "VOC index: %.1f", voc_index_value);
+            reportValue(ESP_ZB_ZCL_CLUSTER_ID_VOC_MEASUREMENT, ESP_ZB_ZCL_ATTR_VOC_MEASUREMENT_MEASURED_VALUE_ID,
+                        &voc_index_value, true);
+        }
 
-        float_t nox_value = nox_index / 10;
-        ESP_LOGI(TAG, "NOx index: %.1f", nox_value);
-        reportValue(ESP_ZB_ZCL_CLUSTER_ID_NOX_MEASUREMENT, ESP_ZB_ZCL_ATTR_NOX_MEASUREMENT_MEASURED_VALUE_ID,
-                    &nox_value, true);
+        // NOx check
+        float_t nox_index_value = (float_t)nox_index / 10.0f;
+        if (nox_index_value > SEN66_NOX_MAX_VALUE) {
+            ESP_LOGI(TAG, "NOx: null (value too high)");
+        } else {
+            ESP_LOGI(TAG, "NOx index: %.1f", nox_index_value);
+            reportValue(ESP_ZB_ZCL_CLUSTER_ID_NOX_MEASUREMENT, ESP_ZB_ZCL_ATTR_NOX_MEASUREMENT_MEASURED_VALUE_ID,
+                        &nox_index_value, true);
+        }
 
         vTaskDelay(pdMS_TO_TICKS(10000));
     }

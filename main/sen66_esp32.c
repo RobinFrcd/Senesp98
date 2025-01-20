@@ -112,13 +112,6 @@ esp_err_t sen66_sensor_init(void) {
     }
     vTaskDelay(pdMS_TO_TICKS(1200));
 
-    // uint8_t serial_number[32] = {0};
-    // error = sen66_get_serial_number(serial_number, 32);
-    // if (error != NO_ERROR) {
-    //     ESP_LOGE(TAG, "error executing get_serial_number(): %i\n", error);
-    //     return ESP_FAIL;
-    // }
-
     // Start measurement
     ESP_LOGI(TAG, "Starting continuous measurement...");
     error = sen66_start_continuous_measurement();
@@ -134,83 +127,3 @@ esp_err_t sen66_sensor_init(void) {
     ESP_LOGI(TAG, "Continuous measurement started successfully");
     return ESP_OK;
 }
-
-void read_sen66_values(void) {
-    ESP_LOGI(TAG, "Starting SEN66 sensor reading task...");
-
-    uint16_t mass_concentration_pm1p0, mass_concentration_pm2p5;
-    uint16_t mass_concentration_pm4p0, mass_concentration_pm10p0;
-    int16_t ambient_humidity, ambient_temperature, voc_index;
-    int16_t nox_index;
-    uint16_t co2;
-    int16_t error;
-
-    // Initialize sensor using the new dedicated function
-    if (sen66_sensor_init() != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize SEN66 sensor");
-        return;
-    }
-
-    while (1) {
-        bool data_ready = false;
-        uint8_t padding;
-
-        // Vérifier si les données sont prêtes
-        error = sen66_get_data_ready(&padding, &data_ready);
-        if (error) {
-            ESP_LOGE(TAG, "Error checking data ready: %d", error);
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            continue;
-        }
-
-        if (!data_ready) {
-            ESP_LOGD(TAG, "Waiting for data to be ready...");
-            vTaskDelay(pdMS_TO_TICKS(100));
-            continue;
-        }
-
-        // Lire les valeurs
-        error = sen66_read_measured_values_as_integers(
-            &mass_concentration_pm1p0, &mass_concentration_pm2p5, &mass_concentration_pm4p0, &mass_concentration_pm10p0,
-            &ambient_humidity, &ambient_temperature, &voc_index, &nox_index, &co2);
-
-        if (error) {
-            ESP_LOGE(TAG, "Error reading values: %d", error);
-        } else {
-            // Afficher les valeurs
-            ESP_LOGI(TAG, "PM1.0: %.1f µg/m³", mass_concentration_pm1p0 / 10.0f);
-            ESP_LOGI(TAG, "PM2.5: %.1f µg/m³", mass_concentration_pm2p5 / 10.0f);
-            ESP_LOGI(TAG, "PM4.0: %.1f µg/m³", mass_concentration_pm4p0 / 10.0f);
-            ESP_LOGI(TAG, "PM10: %.1f µg/m³", mass_concentration_pm10p0 / 10.0f);
-            ESP_LOGI(TAG, "Temperature: %.1f °C", ambient_temperature / 200.0f);
-            ESP_LOGI(TAG, "Humidity: %.1f %%", ambient_humidity / 100.0f);
-            ESP_LOGI(TAG, "VOC Index: %.1f", voc_index / 10.0f);
-            ESP_LOGI(TAG, "NOx Index: %.1f", nox_index / 10.0f);
-            ESP_LOGI(TAG, "CO2: %d ppm", co2);
-        }
-
-        // Attendre 1 seconde avant la prochaine lecture
-        vTaskDelay(pdMS_TO_TICKS(5000));
-    }
-}
-
-// Ajoutez cette fonction globale pour récupérer la température
-int16_t get_sen66_temperature(void) {
-    int16_t ambient_temperature;
-    int16_t error =
-        sen66_read_measured_values_as_integers(NULL, NULL, NULL, NULL,  // Ignorer les autres valeurs PM
-                                               NULL, &ambient_temperature, NULL, NULL, NULL  // Ignorer VOC, NOx, CO2
-        );
-
-    if (error) {
-        ESP_LOGE(TAG, "Error reading temperature: %d", error);
-        return 0;  // Valeur par défaut en cas d'erreur
-    }
-
-    return ambient_temperature;
-}
-
-// void app_main(void) {
-//     ESP_LOGI(TAG, "Starting sensor reading task...");
-//     read_sen66_values();
-// }

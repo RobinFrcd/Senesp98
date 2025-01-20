@@ -53,7 +53,35 @@
         .host_connection_mode = ZB_HOST_CONNECTION_MODE_NONE, \
     }
 
-int16_t get_sen66_temperature(void);
 esp_err_t sen66_sensor_init(void);
+
+// Ranges as defined in https://sensirion.com/media/documents/FAFC548D/6731FFFA/Sensirion_Datasheet_SEN6x.pdf
+
+#define SEN66_TEMP_MIN_VALUE -10  // °C
+#define SEN66_TEMP_MAX_VALUE 50   // °C
+
+#define SEN66_HUMIDITY_MIN_VALUE 0   // %
+#define SEN66_HUMIDITY_MAX_VALUE 90  // %
+
+#define SEN66_PM1_MIN_VALUE 0     // μg/m3
+#define SEN66_PM1_MAX_VALUE 1000  // μg/m3
+
+#define SEN66_PM2_5_MIN_VALUE 0     // μg/m3
+#define SEN66_PM2_5_MAX_VALUE 1000  // μg/m3
+
+#define SEN66_PM4_MIN_VALUE 0     // μg/m3
+#define SEN66_PM4_MAX_VALUE 1000  // μg/m3
+
+#define SEN66_PM10_MIN_VALUE 0     // μg/m3
+#define SEN66_PM10_MAX_VALUE 1000  // μg/m3
+
+#define SEN66_VOC_MIN_VALUE 0    // index
+#define SEN66_VOC_MAX_VALUE 500  // index
+
+#define SEN66_NOX_MIN_VALUE 0    // index
+#define SEN66_NOX_MAX_VALUE 500  // index
+
+#define SEN66_CO2_MIN_VALUE 0      // ppm
+#define SEN66_CO2_MAX_VALUE 40000  // ppm
 
 #endif  // SEN66_ESP32_H

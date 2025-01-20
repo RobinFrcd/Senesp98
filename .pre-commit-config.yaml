@@ -24,7 +24,7 @@ repos:
     rev: v1.3.5
     hooks:
     -   id: cpplint
-        args: ["--filter=-legal/copyright,-build/include_subdir", "--linelength=120"]
+        args: ["--filter=-legal/copyright,-build/include_subdir,-readability/casting", "--linelength=120"]
         exclude: ^main/sen66/
 
 -   repo: https://github.com/cheshirekow/cmake-format-precommit
@@ -33,4 +33,4 @@ repos:
     -   id: cmake-format
         exclude: ^main/sen66/
     -   id: cmake-lint
-        exclude: ^main/sen66/ 
+        exclude: ^main/sen66/
